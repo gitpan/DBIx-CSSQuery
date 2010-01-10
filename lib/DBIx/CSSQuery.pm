@@ -1,46 +1,49 @@
 package DBIx::CSSQuery;
-
-use warnings;
 use strict;
-
-use 5.008000;
+use 5.008;
 use DBI ":sql_types";
 use DBIx::CSSQuery::DB;
 
-our $VERSION = '0.01';
-
-package DBIx::CSSQuery;
+our $VERSION = '0.02';
 
 use Sub::Exporter -setup => {
     exports => [qw(db)]
 };
-use self;
-
-sub new {
-    return bless {}, self;
-}
 
 {
-    my $self;
+    my $db;
     sub db {
-        $self = DBIx::CSSQuery->new() if !$self;
-        if (!$self->{db}) {
-            $self->{db} = DBIx::CSSQuery::DB->new();
+        my @args = @_;
+        $db = DBIx::CSSQuery->new() if !$db;
+
+        if (!$db->{db}) {
+            $db->{db} = DBIx::CSSQuery::DB->new();
         }
 
-        return $self->{db} if !@_;
-        if ($_[0]) {
-            $self->{selector} = $_[0];
+        return $db->{db} if !@args;
+        if ($args[0]) {
+            $db->{selector} = $args[0];
         }
-        return $self;
+        return $db;
     }
 }
 
+use self;
+
+sub new {
+    return bless {
+        sql_params => {
+            order => "ORDER BY id ASC",
+            limit => undef
+        }
+    }, $self;
+}
+
 sub get {
-    my ($index) = args;
+    my ($index) = @args;
     my $record;
 
-    self->_each(
+    $self->each(
         sql_params => {
             limit => "$index,1"
         },
@@ -52,21 +55,55 @@ sub get {
     return $record
 }
 
-sub each {
-    my ($cb) = args;
-    self->_each(callback => $cb);
-    return self
+sub size {
+    my $parsed = _parse_css_selector($self->{selector});
+    my ($sql, $values) = _build_select_sql_statement($parsed, {
+        select => "count(*)"
+    });
+    my $dbh = $self->{db}->attr("dbh");
+
+    my $sth = $dbh->prepare( $sql );
+    for my $i (0 .. $#{$values} ) {
+        my $v = $values->[$i];
+        $sth->bind_param($i+1, $v->[0], $v->[1]);
+    }
+
+    $sth->execute;
+    my $record = $sth->fetchrow_hashref;
+    return $record->{'count(*)'};
 }
 
-sub _each {
-    my %params = args;
-    my $cb = $params{callback};
-    return self unless defined $cb;
+sub last {
+    $self->{sql_params}{order} =~ s/ASC/DESC/;
+    $self->{sql_params}{limit} = "0,1";
+    return $self;
+}
 
-    my $parsed = _parse_css_selector(self->{selector});
+sub each {
+    my %params;
+    if (@args == 0) {
+        return $self;
+    }
+
+    if (ref($args[0]) eq 'CODE') {
+        $params{callback}= $args[0];
+    }
+    else {
+        %params = @args;
+    }
+
+    my $cb = $params{callback};
+    return $self unless defined $cb;
+
+    my $parsed = _parse_css_selector($self->{selector});
+
+    for(keys %{$self->{sql_params}}) {
+        $params{sql_params}{$_} = $self->{sql_params}{$_};
+    }
+
     my ($sql, $values) = _build_select_sql_statement($parsed, $params{sql_params});
 
-    my $dbh = self->{db}->attr("dbh");
+    my $dbh = $self->{db}->attr("dbh");
 
     my $sth = $dbh->prepare( $sql );
 
@@ -79,7 +116,8 @@ sub _each {
     while (my $record = $sth->fetchrow_hashref) {
         $cb->($record);
     }
-    return self;
+
+    return $self;
 }
 
 sub _build_select_sql_statement {
@@ -90,8 +128,9 @@ sub _build_select_sql_statement {
     my @values = ();
 
     my $from  = " FROM $p->{type} ";
-    my $where = " WHERE ";
+    my $where = "";
     if ($p->{attribute} =~ m/ \[ (.+) = (.+) \] /x ) {
+        $where = " WHERE ";
         my $field = $1;
         my $val = $2;
 
@@ -107,7 +146,14 @@ sub _build_select_sql_statement {
     $params = {} if !defined($params);
     my $limit = defined($params->{limit}) ? " LIMIT $params->{limit}" : "";
 
-    return "SELECT * $from ${where}${limit}", \@values;
+    my $select = "SELECT * ";
+    $select = "SELECT $params->{'select'} " if $params->{'select'};
+
+    my $order = "ORDER BY id ASC";
+    $order = " " . $params->{'order'} if $params->{'order'};
+
+    print "${select}${from} ${where} ${order} ${limit}\n";
+    return "${select}${from} ${where} ${order} ${limit}", \@values;
 }
 
 sub _parse_css_selector {
@@ -235,6 +281,15 @@ function instead.
 
 Retrieve a single record from the retrieved collection. Returns a hash.
 The value of C<$index> starts from zero.
+
+=item size
+
+Return the total number of records in the current collection.
+
+=item last
+
+Narrow the current collection to contain only the last record. The return
+value is stiall collection that you will need to call 'each' or 'get' the o
 
 =item each( $callback )
 

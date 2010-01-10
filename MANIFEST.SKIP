@@ -1,4 +1,6 @@
 ^.git/*
 ^Makefile.old$
 ^MANIFEST.bak$
-
+^blib/*
+^\.shipit
+^.*~$
