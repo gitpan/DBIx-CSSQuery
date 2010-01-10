@@ -4,7 +4,7 @@ use 5.008;
 use DBI ":sql_types";
 use DBIx::CSSQuery::DB;
 
-our $VERSION = '0.02';
+our $VERSION = '0.03';
 
 use Sub::Exporter -setup => {
     exports => [qw(db)]
@@ -152,7 +152,6 @@ sub _build_select_sql_statement {
     my $order = "ORDER BY id ASC";
     $order = " " . $params->{'order'} if $params->{'order'};
 
-    print "${select}${from} ${where} ${order} ${limit}\n";
     return "${select}${from} ${where} ${order} ${limit}", \@values;
 }
 
